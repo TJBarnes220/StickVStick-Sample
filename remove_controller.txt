@@ -1,0 +1,156 @@
+//This script occurs at the event of a controller being disconnected from the game
+//The main argument is the number associated with the disconnected controller 
+var pad_num = argument0;
+
+//Variable to detail if the removal of the controller was successful
+var result = false;
+
+//Code motion for determining length of list
+var _length = ds_list_size(player_list);
+for(var i = 0; i < _length; i++){
+	
+	//Each player can have a game pad associated with them. Each player is examined 
+	//so that actions can be made in response to an active player losing access to 
+	//their controller while the game is running 
+	//However if no player has said gampad nothing major needs to occur
+	var player = player_list[| i];
+	if(player.gamepad_num == pad_num){
+		player.controller_type = CONTROLLER_TYPE.NONE;
+		player.gamepad_num = -1;
+		result = true;
+
+		//These rooms are the various screens that are shown to the player varying from the
+		//character select screen, battle screen to the results screen  
+		//If controller disconnected in css then remove ownership of slot
+		if(room == rm_character_select){
+			
+			//Common errors occur when variables aren't set to any value/object and
+			//attempts are made to fetch information from them
+			//So it is common to make sure the variable is set to something other than -1
+			//which is the value I set to any variable not being represented by any value/object
+
+			//In the character selection screen the player is given access to a player selection slot
+			//this must be revoked if a controller is disconneted as no other entity would have the ability
+			//to manipulate this slot if this did not occur.
+			if(slot_list != -1){
+				var _slot = slot_list[| i];
+				if(_slot.slot_type == SLOT.HUMAN){
+					script_empty_slot(_slot);
+					script_remove_player(player, _slot);
+				}
+				else if(_slot.slot_type == SLOT.COMPUTER){
+					player.slot = -1;
+					_slot.owner_player = -1;
+					instance_destroy(_slot.cursor);
+				}
+				else if(_slot.slot_type == SLOT.NONE){
+					script_remove_player(player, _slot);
+				}
+				
+			}
+		}
+		else if(room == rm_battle_field){ 
+
+			//If disconnected in the middle of a match start reconnect process
+			//If for whatever reason someone playing lost access to their controller they must be 
+			//reconnected in order for gameplay to properly continue
+
+			//If not already paused match will be paused automatically
+			if(!pause){	
+				script_pause();
+			}
+
+			//set true so new text will appear on screen
+			reconnect_controller = true; 
+
+			//The reconnection process consists of text boxes appearing for players to interact with.
+			//Any controller that the game recognizes as connected with will be given a cursor so that 
+			//those controllers can pick which character to assign them selves to. This allows players 
+			//the ability to pick any controller to use for the remaining match
+
+			//Creates 4 text boxes for players to interact with
+			for(var j = 0; j < 4; j++){	
+				var _box = instance_create_layer(room_width * (((j + 1)/4) - (1/8)), room_height/2,"Instances",obj_reconnect_controller_box);
+				_box.y += _box.sprite_height/2;
+				_box.player_id = j;
+				ds_list_add(reconnect_boxes,_box);
+			}
+			//Finds all connected controllers and represents them as cursors on screen
+			//These controllers can move said cursors to reassign to the player that
+			//disconnected
+			var _controller_length = instance_number(obj_found_controller);
+			for(var k = 0; k < _controller_length; k++){
+				var _controller = instance_find(obj_found_controller,k);
+				_controller.reconnect_cursor = instance_create_layer(room_width/8, room_height * (3/4),"Instances",obj_reconnect_cursor);
+				if(_controller.controller_type == CONTROLLER_TYPE.GAMEPAD){
+					_controller.reconnect_cursor.sprite_index = spr_controller_cursor;
+				}
+				else{
+					_controller.reconnect_cursor.sprite_index = spr_keyboard_cursor;
+				}
+				_controller.reconnect_cursor.depth = -201;
+				_controller.reconnect_cursor.owner_controller = _controller;
+			}
+			//	}
+			//}
+		}
+		else if(room == rm_results){
+			//If a controller disconneted in the results screen the game will check if
+			//they wer involved in the battle to prevent the game from locking
+			var _result_length = ds_list_size(result_info_list);
+			for(var j = 0; j < _result_length; j++){
+				//If the player's ID matches with one of the results information objects
+				if(player.id_number == result_info_list[| j].player_id){
+					//If this is not a CPU only match
+					if(!script_CPU_only()){
+						//If the player was involved and not a CPU
+						if(!result_info_list[| j].computer){
+							//If the player hadn't voted for either choice yet
+							//They will automatically vote to cancel
+							if(player.result_choice == -1){
+								player.result_choice = RESULT_CHOICE.CANCEL;
+								cancel_tally++;
+								script_check_tally();
+							}	
+							else if(player.result_choice == RESULT_CHOICE.REMATCH){
+								//If they had voted already for a rematch they will be made to 
+								//switch their vote.
+								player.result_choice = RESULT_CHOICE.CANCEL;
+								rematch_tally--;
+								cancel_tally++;
+								script_check_tally();
+							}
+							//Must break in the situation where this is the only Human player.
+							//Even if they aren't the only one the goal has been achieved and 
+							//there's no other reason to check the other players
+							break;
+						}
+					}
+					else{
+						//If this was an entirely CPU match then the game will check if the controller
+						//that disconnected was the only one connnected. If so the game will
+						//automatically move to the CSS screen. If not, nothing will happen and it
+						//will be left up to the remaining players with connected controllers to
+						//decide on what to do
+						var _only_controller = true;
+						var _player_length2 = ds_list_size(player_list);
+						for(var k = 0; k < _player_length2; k++){
+							var _check = player_list[| k];
+							if(_check.controller_type != CONTROLLER_TYPE.NONE){
+								_only_controller = false;
+								break;
+							}
+						}
+						if(_only_controller){
+							ds_list_clear(battle_info_list);
+							ds_list_clear(result_info_list);
+							ds_list_clear(slot_list);
+							room_goto(rm_character_select);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+return result;
